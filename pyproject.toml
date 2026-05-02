@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "adk-celery-broker"
+version = "0.1.0"
+description = "A lightweight, drop-in replacement library for Google ADK's native FastAPI wrapper using Celery and Redis for distributed execution."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "Your Name", email = "your.email@example.com"},
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "google-agent-adk",
+    "celery>=5.3.6",
+    "redis>=5.0.3",
+    "fastapi>=0.110.1",
+    "uvicorn>=0.29.0",
+    "pydantic>=2.6.4",
+    "pydantic-settings>=2.2.1"
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/adk-celery-broker"
+Repository = "https://github.com/yourusername/adk-celery-broker"
