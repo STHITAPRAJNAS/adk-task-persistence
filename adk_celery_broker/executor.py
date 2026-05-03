@@ -130,6 +130,6 @@ def _resolve_task_store(
         "Using InMemoryA2aTaskStore — task state will not survive pod restarts "
         "and will not be visible across multiple pods. "
         "Pass a database-backed BaseA2aTaskStore for production use.",
-        stacklevel=3,
+        stacklevel=2,
     )
     return InMemoryA2aTaskStore()

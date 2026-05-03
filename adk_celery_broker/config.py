@@ -12,16 +12,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class CeleryConfig(BaseSettings):
-    """Configuration for Celery and Redis."""
+    """
+    Runtime configuration for Celery and Redis.
+
+    All fields can be set via environment variables (case-insensitive) or a
+    ``.env`` file in the working directory.
+
+    Example ``.env``::
+
+        REDIS_BROKER_URL=redis://redis:6379/0
+        REDIS_BACKEND_URL=redis://redis:6379/0
+        MAX_RETRIES=5
+    """
 
     redis_broker_url: str = "redis://localhost:6379/0"
     redis_backend_url: str = "redis://localhost:6379/0"
 
-    # Celery specific configs
+    # Celery serialisation / timezone
     celery_task_track_started: bool = True
     celery_task_serializer: str = "json"
     celery_result_serializer: str = "json"
@@ -29,17 +40,16 @@ class CeleryConfig(BaseSettings):
     celery_timezone: str = "UTC"
     celery_enable_utc: bool = True
 
-    # Task specific configs
+    # Per-task retry behaviour
     max_retries: int = 3
     retry_backoff: bool = True
     retry_backoff_max: int = 600
 
-    # Factory paths for dynamic loading in distributed worker processes
-    # Example format: "my_module.factories:get_agent"
-    agent_factory_path: Optional[str] = None
-    session_service_factory_path: Optional[str] = None
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-# Global config instance
 settings = CeleryConfig()

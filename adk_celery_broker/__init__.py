@@ -15,6 +15,7 @@
 from adk_celery_broker.celery_app import celery_app
 from adk_celery_broker.executor import get_fastapi_app
 from adk_celery_broker.registry import registry
+from adk_celery_broker.runner import AdkAgentRunner, AgentRunner
 from adk_celery_broker.task_store import (
     A2aTask,
     BaseA2aTaskStore,
@@ -23,11 +24,18 @@ from adk_celery_broker.task_store import (
 )
 
 __all__ = [
+    # App builder
     "get_fastapi_app",
+    # Registry
     "registry",
-    "celery_app",
+    # Agent execution
+    "AgentRunner",
+    "AdkAgentRunner",
+    # Task store
     "BaseA2aTaskStore",
     "InMemoryA2aTaskStore",
     "A2aTask",
     "TaskStatus",
+    # Celery app (for worker CLI)
+    "celery_app",
 ]

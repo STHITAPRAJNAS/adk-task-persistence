@@ -21,6 +21,7 @@ classifiers = [
     "Operating System :: OS Independent",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Intended Audience :: Developers",
+    "Typing :: Typed",
 ]
 dependencies = [
     "google-adk>=1.0.0",
@@ -42,3 +43,14 @@ dev = [
 [project.urls]
 Homepage = "https://github.com/sthitaprajnas/adk-celery-executor"
 Repository = "https://github.com/sthitaprajnas/adk-celery-executor"
+"Bug Tracker" = "https://github.com/sthitaprajnas/adk-celery-executor/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["adk_celery_broker"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100

@@ -17,35 +17,37 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 class AgentRegistry:
     """
-    Singleton registry mapping string IDs to agent, session-service, and
-    task-store factory functions.
+    Registry mapping string IDs to agent, session-service, and task-store
+    factory functions.
 
-    Factories are used (rather than instances) so that Celery workers —
-    running in separate processes — can reconstruct all ADK primitives
-    independently without pickling live objects across process boundaries.
+    Factories (not instances) are stored so that Celery workers running in
+    separate processes can reconstruct all ADK primitives independently without
+    pickling live objects across process boundaries.
 
-    Usage::
+    The module-level ``registry`` singleton is the normal entry point::
+
+        from adk_celery_broker import registry
 
         registry.register(
             "my_agent",
-            agent_factory=lambda: MyAgent(),
+            agent_factory=lambda: MyAdkAgentRunner(),
             session_service_factory=lambda: DatabaseSessionService(DB_URL),
             task_store_factory=lambda: PostgresTaskStore(DB_URL),
         )
     """
 
-    _registry: Dict[
-        str,
-        Tuple[
-            Callable[..., Any],           # agent_factory
-            Callable[..., Any],           # session_service_factory
-            Optional[Callable[..., Any]], # task_store_factory
-        ],
-    ] = {}
+    def __init__(self) -> None:
+        self._registry: Dict[
+            str,
+            Tuple[
+                Callable[..., Any],            # agent_factory → AgentRunner
+                Callable[..., Any],            # session_service_factory → BaseSessionService
+                Optional[Callable[..., Any]],  # task_store_factory → BaseA2aTaskStore
+            ],
+        ] = {}
 
-    @classmethod
     def register(
-        cls,
+        self,
         agent_id: str,
         agent_factory: Callable[..., Any],
         session_service_factory: Callable[..., Any],
@@ -56,26 +58,36 @@ class AgentRegistry:
 
         Args:
             agent_id: Unique string identifier for this agent configuration.
-            agent_factory: Returns an ADK BaseAgent instance.
-            session_service_factory: Returns a BaseSessionService instance.
-            task_store_factory: Returns a BaseA2aTaskStore instance.
-                                Omit to use the default InMemoryA2aTaskStore
-                                (not suitable for multi-pod deployments).
+            agent_factory: Zero-argument callable returning an ``AgentRunner``
+                instance.  Use ``AdkAgentRunner`` to wrap a Google ADK
+                ``Runner``, or implement ``AgentRunner`` directly.
+            session_service_factory: Zero-argument callable returning an ADK
+                ``BaseSessionService``.  The worker does not call this
+                directly — embed the session service inside your ``AgentRunner``
+                (e.g. pass it to the ADK ``Runner`` constructor).  Stored here
+                so the HTTP process can reference it if needed.
+            task_store_factory: Zero-argument callable returning a
+                ``BaseA2aTaskStore``.  Both the HTTP pod and workers call this
+                to get their own store instance.  Omit to fall back to
+                ``InMemoryA2aTaskStore`` (not suitable for multi-pod deploys).
         """
-        cls._registry[agent_id] = (agent_factory, session_service_factory, task_store_factory)
+        self._registry[agent_id] = (agent_factory, session_service_factory, task_store_factory)
 
-    @classmethod
     def get(
-        cls, agent_id: str
+        self, agent_id: str
     ) -> Tuple[Callable[..., Any], Callable[..., Any], Optional[Callable[..., Any]]]:
-        """Return (agent_factory, session_service_factory, task_store_factory)."""
-        if agent_id not in cls._registry:
+        """Return ``(agent_factory, session_service_factory, task_store_factory)``."""
+        if agent_id not in self._registry:
             raise KeyError(
                 f"Agent ID '{agent_id}' not found in AgentRegistry. "
                 "Call registry.register() before dispatching tasks."
             )
-        return cls._registry[agent_id]
+        return self._registry[agent_id]
+
+    def _clear(self) -> None:
+        """Remove all registrations. Intended for use in tests only."""
+        self._registry.clear()
 
 
-# Singleton
+# Module-level singleton
 registry = AgentRegistry()
