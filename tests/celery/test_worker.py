@@ -1,10 +1,4 @@
-"""
-Tests for the Celery worker's _execute_async logic.
-
-The a2a stubs from conftest.py provide Task/TaskState/ServerCallContext.
-SqlAlchemyTaskStore is tested separately; here we use a simple in-memory
-dict store stub so we can assert on state transitions without SQLAlchemy.
-"""
+"""Tests for the Celery worker's _execute_async logic."""
 
 import pytest
 
@@ -14,21 +8,19 @@ from tests.conftest import ServerCallContext, Task, TaskState, TaskStatus
 
 
 class DictTaskStore:
-    """Minimal store backed by a plain dict for worker tests."""
-
     def __init__(self):
-        self._data: dict = {}
+        self._data = {}
 
-    async def save(self, task: Task, context) -> None:
+    async def save(self, task, context):
         self._data[task.id] = task
 
-    async def get(self, task_id: str, context) -> Task | None:
+    async def get(self, task_id, context):
         return self._data.get(task_id)
 
     async def list(self, params, context):
         return list(self._data.values())
 
-    async def delete(self, task_id: str, context) -> None:
+    async def delete(self, task_id, context):
         self._data.pop(task_id, None)
 
 
@@ -42,28 +34,13 @@ class FailingRunner(AgentRunner):
         raise ValueError("agent exploded")
 
 
-class TrackingRunner(AgentRunner):
-    def __init__(self, store):
-        self._store = store
-        self.seen_states = []
-
-    async def run(self, payload):
-        ctx = ServerCallContext()
-        task = await self._store.get("t1", ctx)
-        if task:
-            self.seen_states.append(task.status.state)
-        return "ok"
-
-
 @pytest.mark.asyncio
 async def test_completes_and_writes_result(monkeypatch):
     store = DictTaskStore()
     task = Task(id="t1", status=TaskStatus(state=TaskState.SUBMITTED))
     await store.save(task, ServerCallContext())
 
-    # Patch _update_task_state to use our DictTaskStore
     import adk_task_persistence.celery.worker as w_mod
-    original = w_mod._update_task_state
 
     async def patched(ts, tid, state, result=None, error=None):
         ctx = ServerCallContext()

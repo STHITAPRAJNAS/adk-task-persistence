@@ -46,19 +46,16 @@ def agent_factory() -> AdkAgentRunner:
 
 
 def task_store_factory() -> SqlAlchemyTaskStore:
-    """Reconstructed by the worker; same DB as the HTTP pod for shared state."""
     return SqlAlchemyTaskStore(create_async_engine(DB_URL))
 
 
 registry.register(
     APP_NAME,
     agent_factory=agent_factory,
-    session_service_factory=lambda: None,  # embedded in the runner above
+    session_service_factory=lambda: None,
     task_store_factory=task_store_factory,
 )
 
-# The HTTP-side app uses the same task store; the worker writes lifecycle
-# updates here as it processes each Celery job.
 from adk_task_persistence import create_a2a_app  # noqa: E402
 
 # (Build runner + agent_card as in with_adk_runner.py, then:)

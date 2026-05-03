@@ -1,11 +1,10 @@
 """
 Full ADK + Postgres + multi-pod EKS deployment example.
 
-This pattern:
-* Replaces ADK's InMemoryTaskStore with a Postgres-backed SqlAlchemyTaskStore
-* Uses ADK's native A2A stack (SSE streaming, RemoteA2aAgent compatibility)
-* Makes task state survive pod restarts and shareable across pods
-* No Celery — agent runs synchronously inside the HTTP request
+Replaces ADK's InMemoryTaskStore with a Postgres-backed SqlAlchemyTaskStore.
+Uses ADK's native A2A stack (SSE streaming, RemoteA2aAgent compatibility).
+Makes task state survive pod restarts and shareable across pods.
+No Celery — agent runs synchronously inside the HTTP request.
 
 Environment variables:
     GOOGLE_API_KEY    — Gemini API key
@@ -14,10 +13,6 @@ Environment variables:
 
 Run:
     uvicorn examples.with_adk_runner:app --host 0.0.0.0 --port 8000
-
-Pod restart survival:
-    Submit a task, then `kubectl delete pod`.  When the pod comes back, the
-    task row in Postgres is still there.  Other pods can serve status polls.
 """
 
 import os
@@ -28,8 +23,6 @@ from adk_task_persistence import SqlAlchemyTaskStore, create_a2a_app
 
 DB_URL = os.environ.get("DB_URL", "postgresql+asyncpg://user:pass@localhost/mydb")
 APP_NAME = "my_adk_agent"
-
-# ── Build the ADK runner and agent card ───────────────────────────────────────
 
 from google.adk.agents import LlmAgent                    # type: ignore[import]
 from google.adk.runners import Runner                     # type: ignore[import]
@@ -55,8 +48,6 @@ agent_card = AgentCard(
     version="1.0.0",
 )
 
-# ── Wire SqlAlchemyTaskStore into the A2A stack ───────────────────────────────
-
 engine = create_async_engine(DB_URL)
 task_store = SqlAlchemyTaskStore(engine)
 
@@ -68,12 +59,7 @@ app = create_a2a_app(
     version="1.0.0",
 )
 
-# ── After ADK PR #4970 merges, you can simplify to: ──────────────────────────
+# After ADK PR #4970 merges, you can simplify to:
 #
 # from google.adk.cli.fast_api import get_fast_api_app
-#
-# app = get_fast_api_app(
-#     agents_dir="./agents",
-#     a2a=True,
-#     a2a_task_store=task_store,
-# )
+# app = get_fast_api_app(agents_dir="./agents", a2a=True, a2a_task_store=task_store)

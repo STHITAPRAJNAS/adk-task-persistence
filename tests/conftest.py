@@ -15,10 +15,6 @@ import pytest
 from pydantic import BaseModel
 
 
-# ---------------------------------------------------------------------------
-# Minimal a2a type stubs (Pydantic models so model_dump_json / validate work)
-# ---------------------------------------------------------------------------
-
 class TaskState:
     SUBMITTED = "submitted"
     WORKING = "working"
@@ -35,7 +31,7 @@ class TaskState:
 class TaskStatus(BaseModel):
     state: str = TaskState.SUBMITTED
 
-    def __init__(self, state: str | TaskState = TaskState.SUBMITTED, **data):
+    def __init__(self, state=TaskState.SUBMITTED, **data):
         if isinstance(state, TaskState):
             state = state.value
         super().__init__(state=state, **data)
@@ -60,24 +56,20 @@ class ServerCallContext:
     pass
 
 
-# ---------------------------------------------------------------------------
-# Register stub modules so production imports resolve
-# ---------------------------------------------------------------------------
-
 def _register_a2a_stubs() -> None:
     a2a = types.ModuleType("a2a")
     a2a_types = types.ModuleType("a2a.types")
-    a2a_types.Task = Task  # type: ignore[attr-defined]
-    a2a_types.TaskStatus = TaskStatus  # type: ignore[attr-defined]
-    a2a_types.TaskState = TaskState  # type: ignore[attr-defined]
-    a2a_types.ListTasksRequest = ListTasksRequest  # type: ignore[attr-defined]
-    a2a_types.ListTasksResponse = ListTasksResponse  # type: ignore[attr-defined]
+    a2a_types.Task = Task
+    a2a_types.TaskStatus = TaskStatus
+    a2a_types.TaskState = TaskState
+    a2a_types.ListTasksRequest = ListTasksRequest
+    a2a_types.ListTasksResponse = ListTasksResponse
 
     a2a_server = types.ModuleType("a2a.server")
     a2a_server_tasks = types.ModuleType("a2a.server.tasks")
-    a2a_server_tasks.TaskStore = object  # type: ignore[attr-defined]
+    a2a_server_tasks.TaskStore = object
     a2a_server_context = types.ModuleType("a2a.server.context")
-    a2a_server_context.ServerCallContext = ServerCallContext  # type: ignore[attr-defined]
+    a2a_server_context.ServerCallContext = ServerCallContext
     a2a_server_apps = types.ModuleType("a2a.server.apps")
     a2a_server_request_handlers = types.ModuleType("a2a.server.request_handlers")
 

@@ -2,7 +2,7 @@
 Basic usage — SqlAlchemyTaskStore with create_a2a_app().
 
 This is the recommended pattern: native ADK A2A stack with a persistent
-task store.  Works with RemoteA2aAgent.  No Celery required.
+task store. Works with RemoteA2aAgent. No Celery required.
 
 Run:
     pip install adk-task-persistence aiosqlite

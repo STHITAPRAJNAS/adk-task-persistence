@@ -8,7 +8,6 @@ registered in conftest.py so these tests run without google-adk installed.
 import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
 
-# conftest.py registers a2a stubs before any imports
 from tests.conftest import ListTasksRequest, ServerCallContext, Task, TaskState, TaskStatus
 from adk_task_persistence.stores.sqlalchemy_task_store import SqlAlchemyTaskStore
 
@@ -26,15 +25,13 @@ async def store(engine):
     yield s
 
 
-def _ctx() -> ServerCallContext:
+def _ctx():
     return ServerCallContext()
 
 
-def _task(task_id: str, state: str = TaskState.SUBMITTED) -> Task:
+def _task(task_id, state=TaskState.SUBMITTED):
     return Task(id=task_id, status=TaskStatus(state=state))
 
-
-# ── save + get ────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_save_and_get(store):
@@ -55,10 +52,8 @@ async def test_get_missing_returns_none(store):
 async def test_save_updates_existing_row(store):
     task = _task("t1")
     await store.save(task, _ctx())
-
     task.status = TaskStatus(state=TaskState.WORKING)
     await store.save(task, _ctx())
-
     result = await store.get("t1", _ctx())
     assert result.status.state == TaskState.WORKING
 
@@ -68,7 +63,6 @@ async def test_save_result_field(store):
     task = _task("t1")
     task.result = {"answer": 42}
     await store.save(task, _ctx())
-
     result = await store.get("t1", _ctx())
     assert result.result == {"answer": 42}
 
@@ -78,12 +72,9 @@ async def test_save_error_field(store):
     task = _task("t1", TaskState.FAILED)
     task.error = "something exploded"
     await store.save(task, _ctx())
-
     result = await store.get("t1", _ctx())
     assert result.error == "something exploded"
 
-
-# ── list ──────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_list_empty(store):
@@ -108,8 +99,6 @@ async def test_list_filters_by_task_ids(store):
     assert ids == {"t0", "t2"}
 
 
-# ── delete ────────────────────────────────────────────────────────────────────
-
 @pytest.mark.asyncio
 async def test_delete_removes_task(store):
     await store.save(_task("t1"), _ctx())
@@ -119,10 +108,8 @@ async def test_delete_removes_task(store):
 
 @pytest.mark.asyncio
 async def test_delete_nonexistent_is_noop(store):
-    await store.delete("ghost", _ctx())  # must not raise
+    await store.delete("ghost", _ctx())
 
-
-# ── table auto-creation ───────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_table_created_on_first_use(engine):
