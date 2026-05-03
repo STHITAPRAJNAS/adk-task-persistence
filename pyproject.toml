@@ -46,9 +46,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/sthitaprajnas/adk-celery-executor"
-Repository = "https://github.com/sthitaprajnas/adk-celery-executor"
-"Bug Tracker" = "https://github.com/sthitaprajnas/adk-celery-executor/issues"
+Homepage = "https://github.com/sthitaprajnas/adk-task-persistence"
+Repository = "https://github.com/sthitaprajnas/adk-task-persistence"
+"Bug Tracker" = "https://github.com/sthitaprajnas/adk-task-persistence/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["adk_task_persistence"]
