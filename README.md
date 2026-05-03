@@ -1,175 +1,183 @@
-# adk-celery-broker
+# adk-persistence
 
-A production-ready distributed execution backend for Google Agent ADK that fills a concrete gap in ADK's A2A support: **injectable task store**.
+**Persistent, pod-restart-safe A2A task store for Google Agent ADK.**
 
-## The Gap This Fills
-
-Google ADK's `get_fast_api_app` already lets you inject a `session_service` (for ADK per-session state) and a `memory_service` via URI parameters, routing to `DatabaseSessionService` or similar backends.  But when you enable `a2a=True`, ADK **always** creates an `InMemoryTaskStore` internally — there is no parameter to supply your own.
-
-This causes two hard production problems in multi-pod deployments:
-
-| Problem | Root Cause |
-|---|---|
-| **Cross-pod 404 on status poll** | Task state lives only in the pod that accepted the request. The load balancer routes the next poll to a different pod, which has no record of the task. |
-| **Silent state loss on restart** | A container restart wipes the `InMemoryTaskStore`. Any in-flight or queued tasks vanish with no error. |
-
-ADK has already solved the equivalent problem for session and memory services via `DatabaseSessionService`.  `adk-celery-broker` applies the same pattern to **A2A task state**, plus uses Celery to decouple the HTTP ingress from the execution loop.
-
-## How It Works
-
-```
-Client
-  │
-  ▼
-FastAPI pod (any pod, no sticky sessions)
-  │  POST /tasks → save A2aTask(status=submitted) → dispatch to Celery
-  │  GET  /tasks/{id} → task_store.get(id)
-  │
-  ├── Shared Task Store (Postgres / Redis / …)  ◄──┐
-  │                                                 │
-  └── Celery Queue (Redis)                          │
-          │                                         │
-          ▼                                         │
-      Celery Worker                                 │
-        task_store.save(status=working)   ──────────┤
-        runner.run_async(…)                         │
-        task_store.save(status=completed) ──────────┘
-```
-
-Because every pod and every worker reads and writes the same external store, any pod can serve any status poll without sticky routing, and task state survives container restarts.
-
-## Installation
+Drop-in replacement for ADK's `InMemoryTaskStore`. Native fit with ADK's A2A stack — fully compatible with `RemoteA2aAgent` and SSE streaming. Works in multi-pod EKS / Kubernetes deployments today.
 
 ```bash
-pip install adk-celery-broker
+pip install adk-persistence
 ```
 
-## Quickstart
+---
 
-### 1. Implement `BaseA2aTaskStore` for your database
+## The Problem
 
-```python
-# myapp/stores.py
-from typing import Dict, List, Optional
-from adk_celery_broker import A2aTask, BaseA2aTaskStore
+Google ADK's `get_fast_api_app(a2a=True)` always creates an in-process `InMemoryTaskStore`. There is no parameter to inject a persistent one. In any non-trivial deployment this causes:
 
-class PostgresTaskStore(BaseA2aTaskStore):
-    def __init__(self, pool):
-        self._pool = pool  # e.g. asyncpg pool
+1. **Pod-restart data loss** — every in-flight task vanishes silently when a container restarts
+2. **Cross-pod 404s** — status polls routed to a different pod return "not found"
+3. **No horizontal scaling without sticky sessions** — defeats the purpose of stateless web pods
 
-    async def save(self, task: A2aTask) -> None:
-        async with self._pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO a2a_tasks (id, status, payload, result, error)
-                VALUES ($1, $2, $3, $4, $5)
-                ON CONFLICT (id) DO UPDATE
-                SET status=$2, result=$4, error=$5
-                """,
-                task.id, task.status,
-                json.dumps(task.payload),
-                json.dumps(task.result) if task.result else None,
-                task.error,
-            )
+ADK has already solved the equivalent problem for session state via `DatabaseSessionService`.  This library applies the same pattern to A2A task state.
 
-    async def get(self, task_id: str) -> Optional[A2aTask]:
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM a2a_tasks WHERE id=$1", task_id
-            )
-        if row is None:
-            return None
-        return A2aTask(
-            id=row["id"], status=row["status"],
-            payload=json.loads(row["payload"]),
-            result=json.loads(row["result"]) if row["result"] else None,
-            error=row["error"],
-        )
+---
 
-    async def list_tasks(self) -> List[A2aTask]:
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch("SELECT * FROM a2a_tasks")
-        return [A2aTask(id=r["id"], status=r["status"], payload=json.loads(r["payload"])) for r in rows]
+## The Solution
 
-    async def delete(self, task_id: str) -> None:
-        async with self._pool.acquire() as conn:
-            await conn.execute("DELETE FROM a2a_tasks WHERE id=$1", task_id)
+`SqlAlchemyTaskStore` implements ADK's real `a2a.server.tasks.TaskStore` ABC. Tasks are written to your database (Postgres / MySQL / SQLite) instead of in-process memory.
+
+```
+                  ┌──────────────────────────────┐
+                  │  POSTGRES (SqlAlchemyTaskStore)│
+                  │  id │ data (JSON Task)        │
+                  └────────────────┬─────────────┘
+                                   │ shared by all pods
+        ┌──────────────────────────┼───────────────────────────┐
+        ▼                          ▼                           ▼
+   AgentApp Pod A           AgentApp Pod B           AgentApp Pod C
+   (handles request,        (serves status poll      (also serves polls)
+    streams via SSE)         even though Pod A
+                             accepted the request)
 ```
 
-### 2. Register factories and build the app
+The HTTP/SSE protocol is unchanged.  `RemoteA2aAgent` callers see exactly the same A2A streaming responses they always have.  The only difference is *where* task state is written.
+
+---
+
+## Quick Start
+
+### 1. Pick a database
 
 ```python
-# main.py
-from myapp.agents import MyAgent
-from myapp.sessions import DatabaseSessionService
-from myapp.stores import PostgresTaskStore
-from adk_celery_broker import get_fastapi_app, registry
+from sqlalchemy.ext.asyncio import create_async_engine
+from adk_persistence import SqlAlchemyTaskStore
 
-DB_URL = "postgresql://user:pass@db/mydb"
+engine = create_async_engine("postgresql+asyncpg://user:pass@db/mydb")
+task_store = SqlAlchemyTaskStore(engine)
+```
+
+The schema is auto-created on first use:
+
+```sql
+CREATE TABLE adk_a2a_tasks (
+    id         VARCHAR(255) PRIMARY KEY,
+    data       TEXT NOT NULL,                  -- JSON-serialised a2a.types.Task
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+```
+
+### 2. Wire it into your ADK app
+
+**Today** — use `create_a2a_app()` to build the native ADK A2A stack with your store:
+
+```python
+from google.adk.agents import LlmAgent
+from google.adk.runners import Runner
+from google.adk.sessions import DatabaseSessionService
+from a2a.types import AgentCard
+from adk_persistence import SqlAlchemyTaskStore, create_a2a_app
+
+runner = Runner(
+    agent=LlmAgent(name="my_agent", model="gemini-2.0-flash"),
+    app_name="my_app",
+    session_service=DatabaseSessionService(DB_URL),
+)
+
+app = create_a2a_app(
+    runner=runner,
+    agent_card=AgentCard(name="My Agent", url="http://localhost:8000", ...),
+    task_store=SqlAlchemyTaskStore(engine),
+)
+```
+
+**After ADK PR [#4970](https://github.com/google/adk-python/pull/4970) merges** — pass it directly:
+
+```python
+from google.adk.cli.fast_api import get_fast_api_app
+
+app = get_fast_api_app(
+    agents_dir="./agents",
+    a2a=True,
+    a2a_task_store=SqlAlchemyTaskStore(engine),    # ← same class, one parameter
+)
+```
+
+`SqlAlchemyTaskStore` is interface-compatible with the upstream PRs — when they merge, you keep the same store class, you just pass it directly to ADK.
+
+---
+
+## What this library is NOT
+
+| Concern | Solution |
+|---|---|
+| Task state survives pod restart | `SqlAlchemyTaskStore` ✅ |
+| Status polls work from any pod | `SqlAlchemyTaskStore` ✅ |
+| Task state shared across pods | `SqlAlchemyTaskStore` ✅ |
+| `RemoteA2aAgent` keeps working | Native ADK A2A stack — yes ✅ |
+| Long-running agent runs (minutes) survive HTTP pod restart | Optional Celery extension (see below) |
+| Replace ADK's session service | Use ADK's `DatabaseSessionService` directly |
+
+---
+
+## Optional: Celery for Agent-Run Survival
+
+If your agents run for minutes and you need execution to survive an HTTP pod crash mid-run, use the optional Celery extension.
+
+```bash
+pip install "adk-persistence[celery]"
+```
+
+```python
+from adk_persistence.celery import AdkAgentRunner, registry
+
+def agent_factory():
+    return AdkAgentRunner(my_runner)
 
 registry.register(
     "my_agent",
-    agent_factory=lambda: MyAgent(),
-    session_service_factory=lambda: DatabaseSessionService(DB_URL),
-    task_store_factory=lambda: PostgresTaskStore(create_pool(DB_URL)),
-)
-
-app = get_fastapi_app(
-    agent_id="my_agent",
-    task_store=PostgresTaskStore(create_pool(DB_URL)),  # shared across requests in this pod
-    title="My Agent API",
+    agent_factory=agent_factory,
+    session_service_factory=lambda: None,
+    task_store_factory=lambda: SqlAlchemyTaskStore(engine),
 )
 ```
 
-### 3. Run the worker
-
 ```bash
-celery -A adk_celery_broker.celery_app worker --loglevel=info
+celery -A adk_persistence.celery worker --loglevel=info
 ```
 
-### 4. Configure via environment variables
+This is a separate concern from the task store — most users only need `SqlAlchemyTaskStore`.
 
-```bash
-REDIS_BROKER_URL=redis://redis:6379/0
-REDIS_BACKEND_URL=redis://redis:6379/0
-MAX_RETRIES=3
-```
+---
 
-## A2A Endpoints
+## API Reference
 
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/tasks` | Submit a task; returns `202 {"id": "…", "status": "submitted"}` |
-| `GET` | `/tasks/{id}` | Poll task status; returns status + result/error when done |
-| `GET` | `/tasks` | List all known tasks |
+### `SqlAlchemyTaskStore(engine, table_name="adk_a2a_tasks", create_table=True)`
 
-## Task Lifecycle
+Implements `a2a.server.tasks.TaskStore`:
 
-```
-submitted → working → completed
-                    ↘ failed
-                    ↘ canceled
-```
+| Method | Behaviour |
+|---|---|
+| `save(task, context)` | Upsert task row, JSON-serialised |
+| `get(task_id, context)` | Return `Task` or `None` |
+| `list(params, context)` | Return `ListTasksResponse`; honours `params.task_ids` filter |
+| `delete(task_id, context)` | Remove row; no-op if absent |
 
-## `BaseA2aTaskStore` Interface
+### `create_a2a_app(*, runner, agent_card, task_store, **fastapi_kwargs)`
 
-```python
-class BaseA2aTaskStore(ABC):
-    async def save(self, task: A2aTask) -> None: ...
-    async def get(self, task_id: str) -> Optional[A2aTask]: ...
-    async def list_tasks(self) -> List[A2aTask]: ...
-    async def delete(self, task_id: str) -> None: ...
-```
+Builds a `FastAPI` app with ADK's full A2A stack (`A2aAgentExecutor` → `DefaultRequestHandler` → `A2AStarletteApplication`) using your task store. Equivalent to `get_fast_api_app(a2a_task_store=...)` but works today.
 
-`A2aTask` fields: `id`, `status`, `payload`, `result`, `error`, `metadata`.
+---
 
-## Relationship to ADK's `session_service` and `memory_service`
+## Compatibility
 
-| Injectable | ADK parameter | This library | Backed by |
-|---|---|---|---|
-| Session state (per conversation) | `session_service_uri` → `DatabaseSessionService` | `registry.register(session_service_factory=…)` | Your ADK session DB |
-| Memory / knowledge | `memory_service_uri` | `registry.register(…)` | Your ADK memory store |
-| **A2A task lifecycle** | ❌ not injectable in ADK | `task_store=` on `get_fastapi_app` | `BaseA2aTaskStore` impl |
+| Component | Version |
+|---|---|
+| Python | 3.10+ |
+| google-adk | 1.0+ |
+| SQLAlchemy | 2.0+ (async) |
+| Tested DBs | PostgreSQL, SQLite |
+
+---
 
 ## License
 

@@ -5,63 +5,54 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.2.0] — 2026-05-03
+## [0.1.0] — 2026-05-03
+
+Library renamed from `adk-celery-broker` to `adk-persistence` and refocused on
+the primary value: a persistent, pod-restart-safe A2A task store for Google
+Agent ADK.
 
 ### Added
 
-- **`AgentRunner` ABC** (`adk_celery_broker.runner`) — canonical contract for
-  agent execution inside Celery workers.  Implement `async def run(payload)`
-  to wrap any agent runtime.
-- **`AdkAgentRunner`** — wraps a Google ADK `Runner`, parses A2A
-  `params.message` into an ADK `Content` object, and streams events from
-  `runner.run_async()`.
-- **`BaseA2aTaskStore` ABC** (`adk_celery_broker.task_store`) — injectable
-  interface for A2A task lifecycle storage (`save`, `get`, `list_tasks`,
-  `delete`).  Mirrors the `BaseSessionService` / `DatabaseSessionService`
-  injection pattern that ADK already uses for session state, filling the
-  equivalent gap for A2A task tracking.
-- **`InMemoryA2aTaskStore`** — default implementation for local development.
-  Emits a `UserWarning` when used without explicit configuration.
-- **`A2aTask` dataclass** and **`TaskStatus` constants** for typed task
-  lifecycle representation.
-- **`task_store_factory`** parameter to `AgentRegistry.register()`.
-- **`task_store=`** parameter to `get_fastapi_app()`.
-- **`GET /tasks`** endpoint — list all known tasks from the shared store.
-- **`py.typed` marker** (PEP 561) for IDE / type-checker support.
-- **39-test unit suite** covering task store, registry, router, executor, and
-  worker logic without requiring a running Redis or Celery broker.
-- **GitHub Actions CI** (`ci.yml`) — runs tests on Python 3.10/3.11/3.12 on
-  every push and pull request.
-- **GitHub Actions publish** (`publish.yml`) — builds and publishes to PyPI on
-  version tag push using PyPI trusted publishing (no API token required).
-- **`examples/basic_usage.py`** — minimal custom `AgentRunner` pattern.
-- **`examples/with_adk_runner.py`** — full ADK `LlmAgent` + `DatabaseSessionService`
-  + custom `PostgresTaskStore` wiring.
+- **`SqlAlchemyTaskStore`** — implements `a2a.server.tasks.TaskStore` ABC and
+  works with PostgreSQL, MySQL, and SQLite via async SQLAlchemy.  Tasks are
+  stored as JSON for forward compatibility with future `a2a.types.Task`
+  schema changes.  Auto-creates the schema on first use.
+- **`create_a2a_app()`** helper — builds ADK's native A2A stack
+  (`A2aAgentExecutor` → `DefaultRequestHandler` → `A2AStarletteApplication`)
+  with an injectable task store, today, without waiting for ADK PR #4970 to
+  merge.
+- **Optional Celery extension** under `adk_persistence.celery` for
+  long-running agent runs that need to survive HTTP-pod restart.  Includes
+  `AgentRunner` ABC, `AdkAgentRunner` wrapper, registry, and Celery worker.
+- `py.typed` marker (PEP 561) for IDE / type-checker support.
+- 18-test suite covering `SqlAlchemyTaskStore` (in-memory SQLite) and the
+  Celery worker logic.
 
 ### Changed
 
-- `get_fastapi_app()` no longer accepts `stateful_task_store` (was a
-  fabricated ADK-compatibility shim that conflated session service with task
-  store — two unrelated concerns).
-- `AgentRegistry._registry` is now an instance variable (was a class-level
-  mutable dict that caused state bleed across test cases).
-- `AgentRegistry.register()` now accepts an optional `task_store_factory`.
-- Workers resolve the session service from inside the `AgentRunner` (embedded
-  at construction) rather than as a separate registry lookup.
-- `warnings.warn` in `_resolve_task_store` uses `stacklevel=2` (was `3`)
-  so the warning points at the actual `get_fastapi_app()` call site.
-- Removed unused `agent_factory_path` / `session_service_factory_path`
-  settings from `CeleryConfig` — these were config keys with no code reading
-  them.
+- **Package renamed** `adk-celery-broker` → `adk-persistence`.
+- **Module renamed** `adk_celery_broker` → `adk_persistence`.
+- Primary public API is now `SqlAlchemyTaskStore` and `create_a2a_app()`.
+  The previous custom A2A endpoints (`POST /tasks` / `GET /tasks/{id}`) are
+  gone — we use ADK's native A2A stack so `RemoteA2aAgent` callers and SSE
+  streaming work unchanged.
+- Custom `BaseA2aTaskStore` ABC and `A2aTask` dataclass removed in favour of
+  the real `a2a.server.tasks.TaskStore` ABC and `a2a.types.Task` Pydantic
+  model.  This means a `SqlAlchemyTaskStore` instance plugs directly into
+  ADK once `get_fast_api_app(a2a_task_store=...)` lands upstream.
+- Celery is now an opt-in extension (`pip install "adk-persistence[celery]"`)
+  rather than a core dependency.
 
-### Fixed
+### Removed
 
-- `_registry` class-level mutable default no longer bleeds state between
-  independent `AgentRegistry` instances created in tests.
+- `adk_celery_broker` module (superseded by `adk_persistence`).
+- Custom `BaseA2aTaskStore` / `A2aTask` / `TaskStatus` classes.
+- Custom A2A HTTP endpoints (replaced by ADK-native `A2AStarletteApplication`).
 
 ---
 
-## [0.1.0] — 2025-01-01
+## [0.2.0-pre] — `adk-celery-broker`
 
-Initial release — Celery-backed A2A task submission and polling with
-`AgentRegistry` and `get_celery_fastapi_app`.
+Internal preview release on `feature/injectable-task-store` branch.  Never
+published to PyPI.  Used a custom A2A protocol implementation; superseded by
+`adk-persistence` 0.1.0.

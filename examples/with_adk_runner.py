@@ -1,150 +1,79 @@
 """
-Full Google ADK integration — adk-celery-broker with AdkAgentRunner.
+Full ADK + Postgres + multi-pod EKS deployment example.
 
-Shows how to wire a real ADK LlmAgent + DatabaseSessionService + a custom
-database-backed task store into the distributed Celery execution model.
-
-Prerequisites:
-    pip install google-adk asyncpg sqlalchemy[asyncio]
+This pattern:
+* Replaces ADK's InMemoryTaskStore with a Postgres-backed SqlAlchemyTaskStore
+* Uses ADK's native A2A stack (SSE streaming, RemoteA2aAgent compatibility)
+* Makes task state survive pod restarts and shareable across pods
+* No Celery — agent runs synchronously inside the HTTP request
 
 Environment variables:
-    GOOGLE_API_KEY      — Gemini API key
-    DB_URL              — async SQLAlchemy URL, e.g. postgresql+asyncpg://user:pass@host/db
-    REDIS_BROKER_URL    — Redis URL for Celery (default: redis://localhost:6379/0)
+    GOOGLE_API_KEY    — Gemini API key
+    DB_URL            — async SQLAlchemy URL, e.g.
+                        postgresql+asyncpg://user:pass@db/mydb
 
-Run the API:
-    uvicorn examples.with_adk_runner:app --reload
+Run:
+    uvicorn examples.with_adk_runner:app --host 0.0.0.0 --port 8000
 
-Run a Celery worker:
-    celery -A adk_celery_broker.celery_app worker --loglevel=info
-
-Submit a task:
-    curl -X POST http://localhost:8000/tasks \\
-         -H "Content-Type: application/json" \\
-         -d '{
-               "id": "task-1",
-               "params": {
-                 "sessionId": "session-abc",
-                 "userId": "user-123",
-                 "message": {"role": "user", "parts": [{"text": "What is 2+2?"}]}
-               }
-             }'
-
-Poll for result:
-    curl http://localhost:8000/tasks/task-1
+Pod restart survival:
+    Submit a task, then `kubectl delete pod`.  When the pod comes back, the
+    task row in Postgres is still there.  Other pods can serve status polls.
 """
 
 import os
-from typing import Any, Dict, List, Optional
 
-import uvicorn
+from sqlalchemy.ext.asyncio import create_async_engine
 
-from adk_celery_broker import (
-    A2aTask,
-    AdkAgentRunner,
-    BaseA2aTaskStore,
-    TaskStatus,
-    get_fastapi_app,
-    registry,
-)
+from adk_persistence import SqlAlchemyTaskStore, create_a2a_app
 
 DB_URL = os.environ.get("DB_URL", "postgresql+asyncpg://user:pass@localhost/mydb")
-AGENT_ID = "my_adk_agent"
+APP_NAME = "my_adk_agent"
 
-# ---------------------------------------------------------------------------
-# Custom task store backed by SQLAlchemy (production pattern)
-# Replace the stub below with your real async DB client.
-# ---------------------------------------------------------------------------
+# ── Build the ADK runner and agent card ───────────────────────────────────────
 
-class PostgresTaskStore(BaseA2aTaskStore):
-    """
-    Example SQLAlchemy-based task store.
+from google.adk.agents import LlmAgent                    # type: ignore[import]
+from google.adk.runners import Runner                     # type: ignore[import]
+from google.adk.sessions import DatabaseSessionService    # type: ignore[import]
+from a2a.types import AgentCard                           # type: ignore[import]
 
-    In a real implementation, create an async engine/pool in __init__ and use
-    it in each method.  The SQL schema you need::
-
-        CREATE TABLE a2a_tasks (
-            id      TEXT PRIMARY KEY,
-            status  TEXT NOT NULL,
-            payload JSONB,
-            result  JSONB,
-            error   TEXT
-        );
-    """
-
-    def __init__(self, db_url: str) -> None:
-        self._db_url = db_url
-        # self._engine = create_async_engine(db_url)
-
-    async def save(self, task: A2aTask) -> None:
-        # async with self._engine.begin() as conn:
-        #     await conn.execute(
-        #         text("""
-        #             INSERT INTO a2a_tasks (id, status, payload, result, error)
-        #             VALUES (:id, :status, :payload::jsonb, :result::jsonb, :error)
-        #             ON CONFLICT (id) DO UPDATE
-        #             SET status=:status, result=:result::jsonb, error=:error
-        #         """),
-        #         {"id": task.id, "status": task.status, ...}
-        #     )
-        raise NotImplementedError("Wire up your async DB client here")
-
-    async def get(self, task_id: str) -> Optional[A2aTask]:
-        raise NotImplementedError
-
-    async def list_tasks(self) -> List[A2aTask]:
-        raise NotImplementedError
-
-    async def delete(self, task_id: str) -> None:
-        raise NotImplementedError
-
-
-# ---------------------------------------------------------------------------
-# agent_factory: builds an AdkAgentRunner from a real ADK Runner.
-# The runner embeds the session service — workers call agent_factory() to
-# reconstruct the full runner in their own process.
-# ---------------------------------------------------------------------------
-
-def agent_factory() -> AdkAgentRunner:
-    from google.adk.agents import LlmAgent                    # type: ignore[import]
-    from google.adk.runners import Runner                     # type: ignore[import]
-    from google.adk.sessions import DatabaseSessionService    # type: ignore[import]
-
-    agent = LlmAgent(
-        name="my_agent",
-        model="gemini-2.0-flash",
-        instruction="You are a helpful assistant.",
-    )
-    session_service = DatabaseSessionService(db_url=DB_URL)
-    runner = Runner(
-        agent=agent,
-        app_name=AGENT_ID,
-        session_service=session_service,
-    )
-    return AdkAgentRunner(runner)
-
-
-# ---------------------------------------------------------------------------
-# Register everything
-# ---------------------------------------------------------------------------
-
-registry.register(
-    AGENT_ID,
-    agent_factory=agent_factory,
-    session_service_factory=lambda: None,           # session service is inside the runner
-    task_store_factory=lambda: PostgresTaskStore(DB_URL),
+agent = LlmAgent(
+    name="my_agent",
+    model="gemini-2.0-flash",
+    instruction="You are a helpful assistant.",
 )
 
-# ---------------------------------------------------------------------------
-# Build the FastAPI app
-# ---------------------------------------------------------------------------
+runner = Runner(
+    agent=agent,
+    app_name=APP_NAME,
+    session_service=DatabaseSessionService(db_url=DB_URL),
+)
 
-app = get_fastapi_app(
-    agent_id=AGENT_ID,
-    task_store=PostgresTaskStore(DB_URL),  # shared instance for this HTTP pod
-    title="ADK Agent API",
+agent_card = AgentCard(
+    name="My Agent",
+    description="A helpful assistant agent",
+    url="http://localhost:8000",
     version="1.0.0",
 )
 
-if __name__ == "__main__":
-    uvicorn.run("examples.with_adk_runner:app", host="0.0.0.0", port=8000, reload=True)
+# ── Wire SqlAlchemyTaskStore into the A2A stack ───────────────────────────────
+
+engine = create_async_engine(DB_URL)
+task_store = SqlAlchemyTaskStore(engine)
+
+app = create_a2a_app(
+    runner=runner,
+    agent_card=agent_card,
+    task_store=task_store,
+    title="My ADK Agent API",
+    version="1.0.0",
+)
+
+# ── After ADK PR #4970 merges, you can simplify to: ──────────────────────────
+#
+# from google.adk.cli.fast_api import get_fast_api_app
+#
+# app = get_fast_api_app(
+#     agents_dir="./agents",
+#     a2a=True,
+#     a2a_task_store=task_store,
+# )

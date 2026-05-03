@@ -13,17 +13,17 @@
 # limitations under the License.
 
 from celery import Celery
-from adk_celery_broker.config import settings
+from adk_persistence.celery.config import settings
 
 def create_celery_app() -> Celery:
     """
     Creates and configures the Celery application using settings from config.py.
     """
     app = Celery(
-        "adk_celery_broker",
+        "adk_persistence.celery",
         broker=settings.redis_broker_url,
         backend=settings.redis_backend_url,
-        include=["adk_celery_broker.worker"] # Ensure worker tasks are discovered
+        include=["adk_persistence.celery.worker"] # Ensure worker tasks are discovered
     )
 
     app.conf.update(
