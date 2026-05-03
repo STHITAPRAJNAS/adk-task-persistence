@@ -12,71 +12,96 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+Example: adk-celery-broker with injectable task store and session service.
+
+Replace the stub classes below with your real ADK BaseAgent and
+BaseSessionService subclasses, and your own BaseA2aTaskStore implementation
+backed by a database (Postgres, Redis, etc.).
+"""
+
 import asyncio
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
+
 from fastapi.middleware.cors import CORSMiddleware
 
-# Mocking Google ADK components
-class BaseAgent:
-    async def run(self, payload: Dict[str, Any], state: Any = None) -> Dict[str, Any]:
-        print(f"Agent processing payload: {payload}")
-        await asyncio.sleep(1) # Simulate work
-        return {"response": "Mock agent response", "input_payload": payload}
-
-class DatabaseSessionService:
-    def __init__(self):
-        self.db = {}
-
-    async def create_task(self, task_id: str, payload: Dict[str, Any], status: str):
-        self.db[task_id] = {"payload": payload, "status": status}
-        print(f"DB: Created task {task_id} with status {status}")
-
-    async def update_task_status(self, task_id: str, status: str, error: str = None, traceback: str = None):
-        if task_id not in self.db:
-             self.db[task_id] = {}
-        self.db[task_id]["status"] = status
-        print(f"DB: Updated task {task_id} to status {status}")
-
-    async def get_task_status(self, task_id: str) -> Dict[str, Any]:
-        return self.db.get(task_id)
-
-    async def load_state(self, task_id: str) -> Any:
-        return self.db.get(task_id, {}).get("state")
-
-    async def save_state_and_status(self, task_id: str, state: Any, status: str):
-         if task_id not in self.db:
-              self.db[task_id] = {}
-         self.db[task_id]["state"] = state
-         self.db[task_id]["status"] = status
-         print(f"DB: Saved state for task {task_id} and updated status to {status}")
-
-# Factories required for distributed Celery execution
-def agent_factory() -> BaseAgent:
-    return BaseAgent()
-
-def session_service_factory() -> DatabaseSessionService:
-    return DatabaseSessionService()
-
-# Import the new adk_celery_broker components
-from adk_celery_broker.registry import registry
-from adk_celery_broker.executor import get_celery_fastapi_app
-
-# 1. Register them under a unique ID so distributed workers know how to build them
-AGENT_ID = "my_demo_agent"
-registry.register(AGENT_ID, agent_factory, session_service_factory)
-
-# 2. Build the FastAPI app
-# Demonstrate passing ADK CLI arguments like `stateful_task_store` directly.
-# The builder maps it to the session_service under the hood for backwards compatibility.
-my_task_store = session_service_factory()
-app = get_celery_fastapi_app(
-    agent_id=AGENT_ID,
-    stateful_task_store=my_task_store,
-    # Any other standard FastAPI kwargs are passed through:
-    title="My ADK API with agui Compatibility"
+from adk_celery_broker import (
+    A2aTask,
+    BaseA2aTaskStore,
+    InMemoryA2aTaskStore,
+    TaskStatus,
+    get_fastapi_app,
+    registry,
 )
 
-# 3. Mount any required middlewares (e.g., agui, CORS) just like a normal FastAPI app
+
+# ---------------------------------------------------------------------------
+# Stub agent — replace with your real google.adk.agents.BaseAgent subclass
+# ---------------------------------------------------------------------------
+
+class MyAgent:
+    async def run(self, payload: Dict[str, Any], session_service: Any = None) -> Dict[str, Any]:
+        await asyncio.sleep(0.1)  # simulate work
+        return {"response": "Hello from MyAgent", "echo": payload}
+
+
+# ---------------------------------------------------------------------------
+# Stub session service — replace with google.adk.sessions.DatabaseSessionService
+# ---------------------------------------------------------------------------
+
+class MySessionService:
+    """Minimal stub; in production use ADK's DatabaseSessionService."""
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Example custom task store — replace with a real DB-backed implementation
+#
+# In production you might use SQLAlchemy + asyncpg, motor (MongoDB), etc.
+# The only requirement is implementing BaseA2aTaskStore's four async methods.
+# ---------------------------------------------------------------------------
+
+class MyPostgresTaskStore(BaseA2aTaskStore):
+    """Illustrative stub — wire up your real DB client here."""
+
+    def __init__(self) -> None:
+        # Replace with: self._pool = await asyncpg.create_pool(DSN)
+        self._mem: Dict[str, A2aTask] = {}
+
+    async def save(self, task: A2aTask) -> None:
+        self._mem[task.id] = task
+
+    async def get(self, task_id: str) -> Optional[A2aTask]:
+        return self._mem.get(task_id)
+
+    async def list_tasks(self) -> List[A2aTask]:
+        return list(self._mem.values())
+
+    async def delete(self, task_id: str) -> None:
+        self._mem.pop(task_id, None)
+
+
+# ---------------------------------------------------------------------------
+# Wire everything together
+# ---------------------------------------------------------------------------
+
+AGENT_ID = "my_agent"
+
+registry.register(
+    AGENT_ID,
+    agent_factory=MyAgent,
+    session_service_factory=MySessionService,
+    task_store_factory=MyPostgresTaskStore,  # workers use this
+)
+
+# The task_store instance passed here is shared across all requests in this
+# process.  Workers get their own instance via task_store_factory() above.
+app = get_fastapi_app(
+    agent_id=AGENT_ID,
+    task_store=MyPostgresTaskStore(),
+    title="My Agent API",
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -87,5 +112,4 @@ app.add_middleware(
 
 if __name__ == "__main__":
     import uvicorn
-    print("Starting Uvicorn server...")
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

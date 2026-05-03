@@ -15,13 +15,15 @@
 import asyncio
 import logging
 import traceback
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from adk_celery_broker.celery_app import celery_app
 from adk_celery_broker.config import settings
 from adk_celery_broker.registry import registry
+from adk_celery_broker.task_store import A2aTask, BaseA2aTaskStore, InMemoryA2aTaskStore, TaskStatus
 
 logger = logging.getLogger(__name__)
+
 
 @celery_app.task(
     bind=True,
@@ -29,97 +31,128 @@ logger = logging.getLogger(__name__)
     max_retries=settings.max_retries,
     retry_backoff=settings.retry_backoff,
     retry_backoff_max=settings.retry_backoff_max,
-    acks_late=True, # Important for reliability
-    name="adk_celery_broker.worker.execute_a2a_task"
+    acks_late=True,
+    name="adk_celery_broker.worker.execute_a2a_task",
 )
-def execute_a2a_task(self, agent_id: str, task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+def execute_a2a_task(
+    self, agent_id: str, task_id: str, payload: Dict[str, Any]
+) -> Dict[str, Any]:
     """
-    Celery task that executes the ADK agent's run loop asynchronously.
+    Celery task: run an ADK agent and persist results via the task store.
 
-    Args:
-        agent_id: The string ID of the agent registered in the AgentRegistry.
-        task_id: The unique identifier for the A2A task session.
-        payload: The JSON-RPC A2A payload.
+    The agent, session service, and task store are all reconstructed from
+    factories registered in AgentRegistry so that this task is self-contained
+    and can run in any worker process.
     """
-    logger.info(f"Starting execution for task {task_id} with agent_id {agent_id}")
+    logger.info("Starting task %s (agent=%s)", task_id, agent_id)
 
     try:
-        # 1. Use the AgentRegistry to instantiate the correct Agent and SessionService dynamically.
-        agent_factory, session_service_factory = registry.get(agent_id)
-        agent_instance = agent_factory()
-        session_service_instance = session_service_factory()
-    except KeyError as e:
-        logger.error(f"AgentRegistry error: {e}")
-        # Not retrying registry errors as they are likely configuration issues
+        agent_factory, session_service_factory, task_store_factory = registry.get(agent_id)
+        agent = agent_factory()
+        session_service = session_service_factory()
+        task_store: BaseA2aTaskStore = (
+            task_store_factory() if task_store_factory is not None else InMemoryA2aTaskStore()
+        )
+    except KeyError as exc:
+        logger.error("Registry error for agent '%s': %s", agent_id, exc)
         raise
-    except Exception as e:
-        logger.error(f"Failed to instantiate agent or session service: {e}")
+    except Exception as exc:
+        logger.error("Failed to instantiate components for agent '%s': %s", agent_id, exc)
         raise
 
     try:
-        # Run the async logic in a synchronous Celery task
-        result = asyncio.run(_run_agent_async(task_id, payload, agent_instance, session_service_instance))
+        result = asyncio.run(
+            _execute_async(task_id, payload, agent, session_service, task_store)
+        )
         return result
-    except Exception as e:
-        logger.exception(f"Task {task_id} failed with exception.")
-        # Re-raise to trigger Celery retry logic for transient network/LLM errors
-        raise e
+    except Exception:
+        logger.exception("Task %s raised an unhandled exception", task_id)
+        raise
 
-async def _run_agent_async(task_id: str, payload: Dict[str, Any], agent_instance: Any, session_service_instance: Any) -> Dict[str, Any]:
-    """
-    The core async logic for interacting with the ADK primitives.
-    """
-    # Mark as WORKING in DB
+
+async def _execute_async(
+    task_id: str,
+    payload: Dict[str, Any],
+    agent: Any,
+    session_service: Any,
+    task_store: BaseA2aTaskStore,
+) -> Dict[str, Any]:
+    """Core async execution: update task status, run agent, persist result."""
+    # Mark as working
+    working_task = await task_store.get(task_id)
+    if working_task is None:
+        working_task = A2aTask(id=task_id, status=TaskStatus.WORKING, payload=payload)
+    else:
+        working_task.status = TaskStatus.WORKING
+    await task_store.save(working_task)
+
     try:
-        if hasattr(session_service_instance, "update_task_status"):
-             await session_service_instance.update_task_status(task_id, "WORKING")
-    except Exception as e:
-        logger.warning(f"Failed to update task status to WORKING for {task_id}: {e}")
+        final_result = await _run_agent(agent, session_service, payload)
 
-    try:
-        # 2. Load the existing A2A session state using the task_id.
-        state = None
-        if hasattr(session_service_instance, "load_state"):
-            state = await session_service_instance.load_state(task_id)
+        completed_task = await task_store.get(task_id)
+        if completed_task is None:
+            completed_task = A2aTask(id=task_id, status=TaskStatus.COMPLETED, payload=payload)
+        completed_task.status = TaskStatus.COMPLETED
+        completed_task.result = final_result
+        await task_store.save(completed_task)
 
-        # 3. Execute the ADK agent run loop.
-        final_response = None
-        if hasattr(agent_instance, "run_stream"):
-            async for chunk in agent_instance.run_stream(payload, state=state):
-                final_response = chunk
-        elif hasattr(agent_instance, "run"):
-            final_response = await agent_instance.run(payload, state=state)
-        elif hasattr(agent_instance, "__call__"):
-            final_response = await agent_instance(payload, state=state)
-        else:
-             raise ValueError("Agent does not have a run, run_stream, or __call__ method.")
+        logger.info("Task %s completed", task_id)
+        return {"status": TaskStatus.COMPLETED, "result": final_result}
 
-        # 4. Ensure all state changes are committed back to the SessionService.
-        if hasattr(session_service_instance, "save_state_and_status"):
-             await session_service_instance.save_state_and_status(
-                 task_id,
-                 state=final_response,
-                 status="COMPLETED"
-             )
-        elif hasattr(session_service_instance, "update_task_status"):
-             await session_service_instance.update_task_status(task_id, "COMPLETED")
-
-        logger.info(f"Task {task_id} completed successfully.")
-        return {"status": "COMPLETED", "result": final_response}
-
-    except Exception as e:
+    except Exception as exc:
         error_trace = traceback.format_exc()
-        logger.error(f"Task {task_id} failed: {error_trace}")
+        logger.error("Task %s failed: %s", task_id, error_trace)
 
         try:
-             if hasattr(session_service_instance, "update_task_status"):
-                 await session_service_instance.update_task_status(
-                     task_id,
-                     "FAILED",
-                     error=str(e),
-                     traceback=error_trace
-                 )
-        except Exception as inner_e:
-             logger.error(f"Failed to update task {task_id} status to FAILED: {inner_e}")
+            failed_task = await task_store.get(task_id)
+            if failed_task is None:
+                failed_task = A2aTask(id=task_id, status=TaskStatus.FAILED, payload=payload)
+            failed_task.status = TaskStatus.FAILED
+            failed_task.error = str(exc)
+            await task_store.save(failed_task)
+        except Exception as store_exc:
+            logger.error(
+                "Failed to persist FAILED status for task %s: %s", task_id, store_exc
+            )
 
-        raise e
+        raise exc
+
+
+async def _run_agent(agent: Any, session_service: Any, payload: Dict[str, Any]) -> Optional[Any]:
+    """
+    Execute the agent.
+
+    Supports ADK Runner-based agents and simpler callable interfaces.
+    If your agent is a proper ADK BaseAgent, register it via AgentRegistry
+    and wire it to an ADK Runner in your agent_factory — then call
+    runner.run_async() inside a thin wrapper and return the final event here.
+    """
+    # ADK Runner interface (preferred): runner.run_async() returns an async generator
+    if hasattr(agent, "run_async"):
+        final_event = None
+        async for event in agent.run_async(payload, session_service=session_service):
+            final_event = event
+        return final_event
+
+    # Streaming interface
+    if hasattr(agent, "run_stream"):
+        final_chunk = None
+        async for chunk in agent.run_stream(payload, session_service=session_service):
+            final_chunk = chunk
+        return final_chunk
+
+    # Simple async interface
+    if hasattr(agent, "run"):
+        return await agent.run(payload, session_service=session_service)
+
+    # Async callable
+    if callable(agent):
+        result = agent(payload, session_service=session_service)
+        if asyncio.iscoroutine(result):
+            return await result
+        return result
+
+    raise TypeError(
+        f"Agent {type(agent).__name__} does not expose run_async, run_stream, "
+        "run, or __call__. Cannot execute."
+    )

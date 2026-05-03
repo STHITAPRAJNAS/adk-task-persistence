@@ -12,61 +12,124 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Callable, Optional
-from fastapi import FastAPI
-from adk_celery_broker.router import get_celery_a2a_router
-from adk_celery_broker.registry import registry
+import logging
+import warnings
+from typing import Any, Optional
 
-def get_celery_fastapi_app(
+from fastapi import FastAPI
+
+from adk_celery_broker.registry import registry
+from adk_celery_broker.router import get_celery_a2a_router
+from adk_celery_broker.task_store import BaseA2aTaskStore, InMemoryA2aTaskStore
+
+logger = logging.getLogger(__name__)
+
+
+def get_fastapi_app(
+    *,
     agent_id: str = "default",
-    session_service_factory: Optional[Callable[..., Any]] = None,
-    stateful_task_store: Optional[Any] = None,
-    **fastapi_kwargs
+    task_store: Optional[BaseA2aTaskStore] = None,
+    **fastapi_kwargs: Any,
 ) -> FastAPI:
     """
-    Primary interface/builder class that replaces ADK's native get_fastapi_app.
+    Build a FastAPI application that exposes A2A-compatible endpoints backed
+    by Celery for distributed, fault-tolerant agent execution.
 
-    This function initializes a FastAPI application and mounts the custom A2A compliant router
-    that decouples the ingress from the execution loop. It intercepts ADK-specific kwargs
-    like `stateful_task_store` to maintain backwards compatibility with the ADK CLI.
+    This is a targeted replacement for Google ADK's ``get_fast_api_app`` with
+    ``a2a=True``.  ADK always creates an ``InMemoryTaskStore`` internally when
+    you enable A2A — there is no parameter to inject a custom one.  In
+    multi-pod deployments this means task state lives only in the pod that
+    accepted the request, so any poll that hits a different pod returns 404,
+    and a container restart loses all task state silently.
+
+    This function fills that gap: it accepts a ``task_store`` instance backed
+    by any external store (Postgres, Redis, DynamoDB, …) so the entire cluster
+    shares one consistent view of task state.
+
+    ``session_service`` (ADK per-session agent state) is intentionally NOT a
+    parameter here — it is only needed inside Celery workers, which reconstruct
+    it via the factory registered in ``AgentRegistry``.
 
     Args:
-        agent_id: The string ID of the agent registered in the AgentRegistry. Defaults to 'default'.
-        session_service_factory: Optional. A callable returning a SessionService instance.
-                                 If None, it retrieves it from the AgentRegistry using the agent_id.
-        stateful_task_store: Maintains compatibility with ADK CLI native arguments.
-        **fastapi_kwargs: Additional kwargs to pass to FastAPI() (e.g., middleware, title).
+        agent_id: ID previously registered via ``AgentRegistry.register()``.
+        task_store: A ``BaseA2aTaskStore`` instance for A2A task lifecycle
+            tracking (submitted → working → completed / failed).  Supply a
+            database-backed implementation so all pods share the same task
+            state.  Falls back to the factory in ``AgentRegistry`` if one was
+            registered, otherwise defaults to ``InMemoryA2aTaskStore`` with a
+            warning (not suitable for production multi-pod deployments).
+        **fastapi_kwargs: Forwarded verbatim to ``FastAPI()``.  Accepts the
+            standard FastAPI constructor arguments (``title``, ``description``,
+            ``version``, ``lifespan``, ``docs_url``, etc.).
 
     Returns:
-        A configured FastAPI application ready to be served by Uvicorn.
+        A configured ``FastAPI`` application.  Add middleware and mount
+        additional routers as you would with any ``FastAPI`` app.
+
+    Example::
+
+        from adk_celery_broker import get_fastapi_app, registry
+        from myapp.stores import PostgresTaskStore
+        from myapp.sessions import DatabaseSessionService
+
+        def agent_factory():
+            return MyAgent()
+
+        def session_service_factory():
+            return DatabaseSessionService(DB_URL)
+
+        def task_store_factory():
+            return PostgresTaskStore(DB_URL)
+
+        registry.register(
+            "my_agent",
+            agent_factory=agent_factory,
+            session_service_factory=session_service_factory,
+            task_store_factory=task_store_factory,
+        )
+
+        app = get_fastapi_app(
+            agent_id="my_agent",
+            task_store=task_store_factory(),
+            title="My Agent API",
+        )
     """
-    # Maintain compatibility: if stateful_task_store is passed and no session service is provided,
-    # we can use the stateful_task_store as the session service.
-    if session_service_factory is None and stateful_task_store is not None:
-        session_service_factory = lambda: stateful_task_store
+    resolved_task_store = _resolve_task_store(agent_id, task_store)
 
-    # If session service factory is STILL not provided explicitly, look it up in the registry
-    if session_service_factory is None:
-        try:
-            _, session_service_factory = registry.get(agent_id)
-        except KeyError:
-            raise ValueError(
-                f"session_service_factory must be provided, stateful_task_store must be passed, "
-                f"or agent_id '{agent_id}' must be registered in AgentRegistry."
-            )
-
-    # Initialize FastAPI
-    title = fastapi_kwargs.pop("title", "ADK Celery Broker API")
-    description = fastapi_kwargs.pop("description", "A2A HTTP Ingress backed by Celery and Redis")
-
-    app = FastAPI(
-        title=title,
-        description=description,
-        **fastapi_kwargs
+    title = fastapi_kwargs.pop("title", "ADK Celery Broker")
+    description = fastapi_kwargs.pop(
+        "description",
+        "A2A endpoints backed by Celery for distributed agent execution",
     )
 
-    # Create and include the router
-    router = get_celery_a2a_router(agent_id, session_service_factory)
+    app = FastAPI(title=title, description=description, **fastapi_kwargs)
+
+    router = get_celery_a2a_router(agent_id, resolved_task_store)
     app.include_router(router)
 
     return app
+
+
+def _resolve_task_store(
+    agent_id: str,
+    task_store: Optional[BaseA2aTaskStore],
+) -> BaseA2aTaskStore:
+    if task_store is not None:
+        return task_store
+
+    # Try registry
+    try:
+        _, _, task_store_factory = registry.get(agent_id)
+        if task_store_factory is not None:
+            return task_store_factory()
+    except KeyError:
+        pass
+
+    warnings.warn(
+        f"No task_store provided for agent '{agent_id}' and none registered. "
+        "Using InMemoryA2aTaskStore — task state will not survive pod restarts "
+        "and will not be visible across multiple pods. "
+        "Pass a database-backed BaseA2aTaskStore for production use.",
+        stacklevel=3,
+    )
+    return InMemoryA2aTaskStore()

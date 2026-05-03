@@ -12,37 +12,70 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Callable, Any, Dict, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
+
 
 class AgentRegistry:
     """
-    Singleton registry to map string IDs to Agent and SessionService factory functions.
-    This solves the problem of Celery workers needing to know which agent to instantiate
-    when pulling a generic A2A task from Redis across distributed processes.
+    Singleton registry mapping string IDs to agent, session-service, and
+    task-store factory functions.
+
+    Factories are used (rather than instances) so that Celery workers —
+    running in separate processes — can reconstruct all ADK primitives
+    independently without pickling live objects across process boundaries.
+
+    Usage::
+
+        registry.register(
+            "my_agent",
+            agent_factory=lambda: MyAgent(),
+            session_service_factory=lambda: DatabaseSessionService(DB_URL),
+            task_store_factory=lambda: PostgresTaskStore(DB_URL),
+        )
     """
-    _registry: Dict[str, Tuple[Callable[..., Any], Callable[..., Any]]] = {}
+
+    _registry: Dict[
+        str,
+        Tuple[
+            Callable[..., Any],           # agent_factory
+            Callable[..., Any],           # session_service_factory
+            Optional[Callable[..., Any]], # task_store_factory
+        ],
+    ] = {}
 
     @classmethod
-    def register(cls, agent_id: str, agent_factory: Callable[..., Any], session_service_factory: Callable[..., Any]) -> None:
+    def register(
+        cls,
+        agent_id: str,
+        agent_factory: Callable[..., Any],
+        session_service_factory: Callable[..., Any],
+        task_store_factory: Optional[Callable[..., Any]] = None,
+    ) -> None:
         """
-        Registers an agent factory and its corresponding session service factory under an ID.
+        Register factories under a unique agent ID.
 
         Args:
-            agent_id: The unique string identifier for the agent configuration.
-            agent_factory: A callable that returns the ADK Agent instance.
-            session_service_factory: A callable that returns the ADK SessionService instance.
+            agent_id: Unique string identifier for this agent configuration.
+            agent_factory: Returns an ADK BaseAgent instance.
+            session_service_factory: Returns a BaseSessionService instance.
+            task_store_factory: Returns a BaseA2aTaskStore instance.
+                                Omit to use the default InMemoryA2aTaskStore
+                                (not suitable for multi-pod deployments).
         """
-        cls._registry[agent_id] = (agent_factory, session_service_factory)
+        cls._registry[agent_id] = (agent_factory, session_service_factory, task_store_factory)
 
     @classmethod
-    def get(cls, agent_id: str) -> Tuple[Callable[..., Any], Callable[..., Any]]:
-        """
-        Retrieves the factories for a given agent_id.
-        """
+    def get(
+        cls, agent_id: str
+    ) -> Tuple[Callable[..., Any], Callable[..., Any], Optional[Callable[..., Any]]]:
+        """Return (agent_factory, session_service_factory, task_store_factory)."""
         if agent_id not in cls._registry:
-            raise KeyError(f"Agent ID '{agent_id}' not found in AgentRegistry. "
-                           "Ensure it is registered before tasks are executed.")
+            raise KeyError(
+                f"Agent ID '{agent_id}' not found in AgentRegistry. "
+                "Call registry.register() before dispatching tasks."
+            )
         return cls._registry[agent_id]
 
-# Singleton instance access
+
+# Singleton
 registry = AgentRegistry()

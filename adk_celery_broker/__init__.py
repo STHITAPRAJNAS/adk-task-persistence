@@ -12,8 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from adk_celery_broker.executor import get_celery_fastapi_app
-from adk_celery_broker.registry import registry
 from adk_celery_broker.celery_app import celery_app
+from adk_celery_broker.executor import get_fastapi_app
+from adk_celery_broker.registry import registry
+from adk_celery_broker.task_store import (
+    A2aTask,
+    BaseA2aTaskStore,
+    InMemoryA2aTaskStore,
+    TaskStatus,
+)
 
-__all__ = ["get_celery_fastapi_app", "registry", "celery_app"]
+__all__ = [
+    "get_fastapi_app",
+    "registry",
+    "celery_app",
+    "BaseA2aTaskStore",
+    "InMemoryA2aTaskStore",
+    "A2aTask",
+    "TaskStatus",
+]

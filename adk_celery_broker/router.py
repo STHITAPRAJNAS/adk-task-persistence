@@ -13,86 +13,91 @@
 # limitations under the License.
 
 import uuid
-from typing import Any, Dict, Callable
+from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
+from adk_celery_broker.task_store import A2aTask, BaseA2aTaskStore, TaskStatus
 from adk_celery_broker.worker import execute_a2a_task
 
-def get_celery_a2a_router(agent_id: str, session_service_factory: Callable[..., Any]) -> APIRouter:
+
+def get_celery_a2a_router(agent_id: str, task_store: BaseA2aTaskStore) -> APIRouter:
     """
-    Creates the FastAPI APIRouter that handles A2A protocol compliant endpoints.
+    Build the FastAPI router for A2A-compatible endpoints backed by Celery.
+
+    The task_store is a shared instance (e.g. a connection-pooled database
+    client) that is read by both the HTTP pods and the Celery workers.  This
+    is what makes status polling work correctly across multiple pods without
+    sticky sessions.
 
     Args:
-        agent_id: The string ID of the agent registered in the AgentRegistry.
-        session_service_factory: A callable that returns the ADK SessionService instance
-                                 used for polling and initial state writing.
+        agent_id: ID registered via AgentRegistry.register().
+        task_store: Persistent store for A2A task lifecycle state.  Must be
+                    the same backing store that the Celery workers write to.
     """
     router = APIRouter()
 
-    @router.post("/", status_code=status.HTTP_202_ACCEPTED)
+    @router.post("/tasks", status_code=status.HTTP_202_ACCEPTED)
     async def submit_task(request: Request) -> JSONResponse:
-        """
-        Accepts a standard A2A JSON-RPC request and dispatches to Celery.
-        """
+        """Accept an A2A JSON-RPC request and hand it off to Celery."""
         try:
             payload = await request.json()
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
-        # Extract task_id from payload or generate one
-        task_id = payload.get("id", str(uuid.uuid4()))
+        task_id = payload.get("id") or str(uuid.uuid4())
 
-        # Instantiate session service to write initial state
+        task = A2aTask(id=task_id, status=TaskStatus.SUBMITTED, payload=payload)
         try:
-            session_service = session_service_factory()
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to instantiate session service: {e}")
+            await task_store.save(task)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Task store error: {exc}")
 
-        # Write initial SUBMITTED state to the injected SessionService
-        try:
-            if hasattr(session_service, "create_task"):
-                 await session_service.create_task(task_id, payload=payload, status="SUBMITTED")
-            elif hasattr(session_service, "update_task_status"):
-                 await session_service.update_task_status(task_id, "SUBMITTED")
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to write initial state: {e}")
-
-        # Dispatch payload to Celery
         execute_a2a_task.apply_async(args=[agent_id, task_id, payload], task_id=task_id)
 
-        # Return A2A-compliant 202 Accepted response containing the task_id
         return JSONResponse(
             status_code=status.HTTP_202_ACCEPTED,
-            content={"task_id": task_id, "status": "SUBMITTED"}
+            content={"id": task_id, "status": TaskStatus.SUBMITTED},
         )
 
-    @router.get("/task/{task_id}")
-    async def get_task_status(task_id: str) -> Dict[str, Any]:
+    @router.get("/tasks/{task_id}")
+    async def get_task(task_id: str) -> Dict[str, Any]:
         """
-        Queries the SessionService to return the current A2A status
-        and final payload if completed, strictly bypassing local memory.
+        Return the current lifecycle state of an A2A task.
+
+        Because this reads from the shared task_store (not local memory), any
+        pod in the cluster can serve this request regardless of which pod
+        originally accepted the submission.
         """
         try:
-            session_service = session_service_factory()
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to instantiate session service: {e}")
+            task = await task_store.get(task_id)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Task store error: {exc}")
 
-        # Query DatabaseSessionService to bypass local memory
-        if hasattr(session_service, "get_task_status"):
-            task_info = await session_service.get_task_status(task_id)
-            if not task_info:
-                raise HTTPException(status_code=404, detail="Task not found")
-            return task_info
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
 
-        # Fallback if specific get_task_status is not implemented but get_state is
-        if hasattr(session_service, "load_state"):
-            state = await session_service.load_state(task_id)
-            if state is None:
-                 raise HTTPException(status_code=404, detail="Task not found")
-            return state
+        response: Dict[str, Any] = {"id": task.id, "status": task.status}
+        if task.result is not None:
+            response["result"] = task.result
+        if task.error is not None:
+            response["error"] = task.error
+        return response
 
-        raise NotImplementedError("Session service missing required status retrieval methods.")
+    @router.get("/tasks")
+    async def list_tasks() -> Dict[str, Any]:
+        """Return all known tasks from the task store."""
+        try:
+            tasks = await task_store.list_tasks()
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Task store error: {exc}")
+
+        return {
+            "tasks": [
+                {"id": t.id, "status": t.status}
+                for t in tasks
+            ]
+        }
 
     return router
