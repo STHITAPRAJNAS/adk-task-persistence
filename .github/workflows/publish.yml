@@ -26,7 +26,7 @@ jobs:
 
       - name: Run tests before publishing
         run: |
-          pip install -e ".[dev]"
+          pip install -e ".[dev,celery]"
           pytest tests/ -v --tb=short
 
       - name: Build distribution
