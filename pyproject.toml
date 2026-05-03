@@ -1,0 +1,61 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "adk-task-persistence"
+version = "0.1.0"
+description = "Persistent, pod-restart-safe A2A task store for Google Agent ADK. Drop-in replacement for InMemoryTaskStore."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "Sthitaprajna Sahoo", email = "papu.sahoo@gmail.com"},
+]
+keywords = ["google-adk", "a2a", "agent", "task-store", "sqlalchemy", "kubernetes", "eks"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Intended Audience :: Developers",
+    "Typing :: Typed",
+]
+dependencies = [
+    "google-adk>=1.0.0",
+    "fastapi>=0.110.1",
+    "sqlalchemy[asyncio]>=2.0",
+    "pydantic>=2.6.4",
+]
+
+[project.optional-dependencies]
+celery = [
+    "celery>=5.3.6",
+    "redis>=5.0.3",
+    "uvicorn>=0.29.0",
+    "pydantic-settings>=2.2.1",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+    "aiosqlite>=0.20",
+]
+
+[project.urls]
+Homepage = "https://github.com/sthitaprajnas/adk-celery-executor"
+Repository = "https://github.com/sthitaprajnas/adk-celery-executor"
+"Bug Tracker" = "https://github.com/sthitaprajnas/adk-celery-executor/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["adk_task_persistence"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
