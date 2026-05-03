@@ -6,15 +6,7 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""
-AgentRunner — execution contract for Celery workers.
-
-The worker calls ``AgentRunner.run(payload)`` with the raw A2A JSON-RPC
-payload and stores whatever it returns as the task result.
-
-For ADK agents, use ``AdkAgentRunner`` which wraps a ``google.adk.runners.Runner``,
-parses the A2A message from the payload, and calls ``runner.run_async()``.
-"""
+"""AgentRunner — execution contract for Celery workers."""
 
 import uuid
 from abc import ABC, abstractmethod
@@ -30,35 +22,7 @@ class AgentRunner(ABC):
 
 
 class AdkAgentRunner(AgentRunner):
-    """
-    Wraps a Google ADK ``Runner`` for Celery-based async execution.
-
-    Parses ``params.message`` from the A2A payload into an ADK ``Content``
-    object and calls ``runner.run_async()``.
-
-    Usage::
-
-        from google.adk.agents import LlmAgent
-        from google.adk.runners import Runner
-        from google.adk.sessions import DatabaseSessionService
-        from adk_task_persistence.celery import AdkAgentRunner, registry
-
-        def agent_factory() -> AdkAgentRunner:
-            return AdkAgentRunner(
-                Runner(
-                    agent=LlmAgent(name="my_agent", model="gemini-2.0-flash"),
-                    app_name="my_app",
-                    session_service=DatabaseSessionService(DB_URL),
-                )
-            )
-
-        registry.register(
-            "my_agent",
-            agent_factory=agent_factory,
-            session_service_factory=lambda: None,  # embedded in runner above
-            task_store_factory=lambda: SqlAlchemyTaskStore(engine),
-        )
-    """
+    """Wraps a Google ADK ``Runner`` for Celery-based async execution."""
 
     def __init__(self, runner: Any) -> None:
         self._runner = runner

@@ -6,18 +6,7 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""
-Celery task for optional async agent execution.
-
-This is the secondary concern of adk-task-persistence: keeping the HTTP pod free
-during long-running (minutes-scale) agent invocations.  The primary concern
-— pod-restart-safe task state — is solved by SqlAlchemyTaskStore alone and
-does not require Celery.
-
-The worker uses the A2A task store (SqlAlchemyTaskStore) to track lifecycle
-state.  Because the store is shared across pods and workers, any pod can
-serve status polls at any time.
-"""
+"""Celery task for optional async agent execution."""
 
 import asyncio
 import logging
@@ -31,7 +20,6 @@ from adk_task_persistence.celery.runner import AgentRunner
 
 logger = logging.getLogger(__name__)
 
-# Task status strings that match the a2a.types.TaskState enum values
 _WORKING = "working"
 _COMPLETED = "completed"
 _FAILED = "failed"
@@ -49,12 +37,7 @@ _FAILED = "failed"
 def execute_a2a_task(
     self, agent_id: str, task_id: str, payload: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """
-    Run an ADK agent asynchronously and persist the result via the task store.
-
-    All components are reconstructed from AgentRegistry factories so this
-    task is self-contained and portable across worker processes/pods.
-    """
+    """Run an ADK agent asynchronously and persist the result via the task store."""
     logger.info("Starting task %s (agent=%s)", task_id, agent_id)
 
     try:
@@ -63,8 +46,7 @@ def execute_a2a_task(
         if not isinstance(agent_runner, AgentRunner):
             raise TypeError(
                 f"agent_factory for '{agent_id}' must return an AgentRunner, "
-                f"got {type(agent_runner).__name__}. "
-                "Use AdkAgentRunner or implement AgentRunner.run()."
+                f"got {type(agent_runner).__name__}."
             )
         task_store = task_store_factory() if task_store_factory is not None else None
     except KeyError as exc:
@@ -116,23 +98,16 @@ async def _update_task_state(
     result: Any = None,
     error: str | None = None,
 ) -> None:
-    """
-    Update task state in the store.
-
-    Works with both SqlAlchemyTaskStore (a2a.types.Task) and any
-    store that accepts save() with a context.
-    """
     if task_store is None:
         logger.warning("No task_store registered for task %s; state not persisted", task_id)
         return
 
     try:
-        # Build a minimal context — a2a.server.context.ServerCallContext
         from a2a.server.context import ServerCallContext  # type: ignore[import]
         from a2a.types import Task, TaskState, TaskStatus  # type: ignore[import]
 
         ctx = ServerCallContext()
-        existing: Task | None = await task_store.get(task_id, ctx)
+        existing = await task_store.get(task_id, ctx)
 
         if existing is not None:
             existing.status = TaskStatus(state=TaskState(state))
@@ -142,13 +117,8 @@ async def _update_task_state(
                 existing.error = error
             await task_store.save(existing, ctx)
         else:
-            task = Task(
-                id=task_id,
-                status=TaskStatus(state=TaskState(state)),
-            )
+            task = Task(id=task_id, status=TaskStatus(state=TaskState(state)))
             await task_store.save(task, ctx)
 
     except Exception as exc:
-        logger.error(
-            "Failed to update task %s to state '%s': %s", task_id, state, exc
-        )
+        logger.error("Failed to update task %s to state '%s': %s", task_id, state, exc)
