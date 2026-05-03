@@ -8,21 +8,41 @@ version = "0.1.0"
 description = "Persistent, pod-restart-safe A2A task store for Google Agent ADK. Drop-in replacement for InMemoryTaskStore."
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "Apache-2.0"}
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [
     {name = "Sthitaprajna Sahoo", email = "papu.sahoo@gmail.com"},
 ]
-keywords = ["google-adk", "a2a", "agent", "task-store", "sqlalchemy", "kubernetes", "eks"]
+keywords = [
+    "google-adk",
+    "a2a",
+    "agent",
+    "task-store",
+    "sqlalchemy",
+    "kubernetes",
+    "eks",
+    "persistent",
+    "multi-pod",
+    "celery",
+    "async",
+    "fastapi",
+    "postgres",
+    "postgresql",
+    "llm",
+    "genai",
+]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Database",
     "Intended Audience :: Developers",
     "Typing :: Typed",
+    "Framework :: AsyncIO",
+    "Development Status :: 4 - Beta",
 ]
 dependencies = [
     "google-adk>=1.0.0",
