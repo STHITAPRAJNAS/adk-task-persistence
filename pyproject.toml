@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "adk-task-persistence"
-version = "0.1.0"
+version = "0.2.0"
 description = "Persistent, pod-restart-safe A2A task store for Google Agent ADK. Drop-in replacement for InMemoryTaskStore."
 readme = "README.md"
 requires-python = ">=3.10"

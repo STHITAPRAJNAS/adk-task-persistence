@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.0] — 2026-05-03
+
+### Changed
+
+- Polished README with badges, architecture diagram, API reference tables, and multi-pod Kubernetes usage guide.
+- Switched `pyproject.toml` to PEP 639 SPDX license expression (`Apache-2.0`) — PyPI now shows the SPDX badge.
+- Expanded keywords for PyPI discoverability (`persistent`, `multi-pod`, `llm`, `genai`, `postgres`, `postgresql`, etc.).
+- Added classifiers: `Framework :: AsyncIO`, `Development Status :: 4 - Beta`, `Topic :: Database`.
+
 ## [0.1.0] — 2026-05-03
 
 Library renamed from `adk-celery-broker` to `adk-task-persistence` and refocused on
