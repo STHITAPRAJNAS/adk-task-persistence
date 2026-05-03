@@ -1,5 +1,5 @@
 import pytest
-from adk_persistence.celery.registry import AgentRegistry
+from adk_task_persistence.celery.registry import AgentRegistry
 
 
 @pytest.fixture

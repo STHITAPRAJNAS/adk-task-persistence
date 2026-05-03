@@ -24,7 +24,7 @@ import os
 
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from adk_persistence import SqlAlchemyTaskStore, create_a2a_app
+from adk_task_persistence import SqlAlchemyTaskStore, create_a2a_app
 
 DB_URL = os.environ.get("DB_URL", "postgresql+asyncpg://user:pass@localhost/mydb")
 APP_NAME = "my_adk_agent"

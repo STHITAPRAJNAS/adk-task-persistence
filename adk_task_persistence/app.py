@@ -86,7 +86,7 @@ def create_a2a_app(
         from google.adk.agents import LlmAgent
         from google.adk.runners import Runner
         from google.adk.sessions import DatabaseSessionService
-        from adk_persistence import SqlAlchemyTaskStore, create_a2a_app
+        from adk_task_persistence import SqlAlchemyTaskStore, create_a2a_app
 
         engine = create_async_engine("postgresql+asyncpg://...")
         runner = Runner(

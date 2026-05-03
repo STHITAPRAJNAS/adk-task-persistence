@@ -8,8 +8,8 @@ dict store stub so we can assert on state transitions without SQLAlchemy.
 
 import pytest
 
-from adk_persistence.celery.runner import AgentRunner
-from adk_persistence.celery.worker import _execute_async
+from adk_task_persistence.celery.runner import AgentRunner
+from adk_task_persistence.celery.worker import _execute_async
 from tests.conftest import ServerCallContext, Task, TaskState, TaskStatus
 
 
@@ -62,7 +62,7 @@ async def test_completes_and_writes_result(monkeypatch):
     await store.save(task, ServerCallContext())
 
     # Patch _update_task_state to use our DictTaskStore
-    import adk_persistence.celery.worker as w_mod
+    import adk_task_persistence.celery.worker as w_mod
     original = w_mod._update_task_state
 
     async def patched(ts, tid, state, result=None, error=None):
@@ -94,7 +94,7 @@ async def test_fails_and_writes_error(monkeypatch):
     task = Task(id="t1", status=TaskStatus())
     await store.save(task, ServerCallContext())
 
-    import adk_persistence.celery.worker as w_mod
+    import adk_task_persistence.celery.worker as w_mod
 
     async def patched(ts, tid, state, result=None, error=None):
         ctx = ServerCallContext()

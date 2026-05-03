@@ -10,21 +10,21 @@ For the simpler "task state survives pod restart" use case, just use
 SqlAlchemyTaskStore + create_a2a_app() — no Celery needed.
 
 Install:
-    pip install "adk-persistence[celery]"
+    pip install "adk-task-persistence[celery]"
 
 Run the API:
     uvicorn examples.with_celery:app --host 0.0.0.0 --port 8000
 
 Run a worker (separate process, Redis must be running):
-    celery -A adk_persistence.celery worker --loglevel=info
+    celery -A adk_task_persistence.celery worker --loglevel=info
 """
 
 import os
 
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from adk_persistence import SqlAlchemyTaskStore
-from adk_persistence.celery import AdkAgentRunner, registry
+from adk_task_persistence import SqlAlchemyTaskStore
+from adk_task_persistence.celery import AdkAgentRunner, registry
 
 DB_URL = os.environ.get("DB_URL", "postgresql+asyncpg://user:pass@localhost/mydb")
 APP_NAME = "my_adk_agent"
@@ -59,7 +59,7 @@ registry.register(
 
 # The HTTP-side app uses the same task store; the worker writes lifecycle
 # updates here as it processes each Celery job.
-from adk_persistence import create_a2a_app  # noqa: E402
+from adk_task_persistence import create_a2a_app  # noqa: E402
 
 # (Build runner + agent_card as in with_adk_runner.py, then:)
 # app = create_a2a_app(runner=runner, agent_card=agent_card, task_store=task_store_factory(), ...)

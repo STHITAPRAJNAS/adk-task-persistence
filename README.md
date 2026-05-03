@@ -1,11 +1,11 @@
-# adk-persistence
+# adk-task-persistence
 
 **Persistent, pod-restart-safe A2A task store for Google Agent ADK.**
 
 Drop-in replacement for ADK's `InMemoryTaskStore`. Native fit with ADK's A2A stack — fully compatible with `RemoteA2aAgent` and SSE streaming. Works in multi-pod EKS / Kubernetes deployments today.
 
 ```bash
-pip install adk-persistence
+pip install adk-task-persistence
 ```
 
 ---
@@ -50,7 +50,7 @@ The HTTP/SSE protocol is unchanged.  `RemoteA2aAgent` callers see exactly the sa
 
 ```python
 from sqlalchemy.ext.asyncio import create_async_engine
-from adk_persistence import SqlAlchemyTaskStore
+from adk_task_persistence import SqlAlchemyTaskStore
 
 engine = create_async_engine("postgresql+asyncpg://user:pass@db/mydb")
 task_store = SqlAlchemyTaskStore(engine)
@@ -75,7 +75,7 @@ from google.adk.agents import LlmAgent
 from google.adk.runners import Runner
 from google.adk.sessions import DatabaseSessionService
 from a2a.types import AgentCard
-from adk_persistence import SqlAlchemyTaskStore, create_a2a_app
+from adk_task_persistence import SqlAlchemyTaskStore, create_a2a_app
 
 runner = Runner(
     agent=LlmAgent(name="my_agent", model="gemini-2.0-flash"),
@@ -124,11 +124,11 @@ app = get_fast_api_app(
 If your agents run for minutes and you need execution to survive an HTTP pod crash mid-run, use the optional Celery extension.
 
 ```bash
-pip install "adk-persistence[celery]"
+pip install "adk-task-persistence[celery]"
 ```
 
 ```python
-from adk_persistence.celery import AdkAgentRunner, registry
+from adk_task_persistence.celery import AdkAgentRunner, registry
 
 def agent_factory():
     return AdkAgentRunner(my_runner)
@@ -142,7 +142,7 @@ registry.register(
 ```
 
 ```bash
-celery -A adk_persistence.celery worker --loglevel=info
+celery -A adk_task_persistence.celery worker --loglevel=info
 ```
 
 This is a separate concern from the task store — most users only need `SqlAlchemyTaskStore`.

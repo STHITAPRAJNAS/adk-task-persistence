@@ -9,7 +9,7 @@
 """
 Celery task for optional async agent execution.
 
-This is the secondary concern of adk-persistence: keeping the HTTP pod free
+This is the secondary concern of adk-task-persistence: keeping the HTTP pod free
 during long-running (minutes-scale) agent invocations.  The primary concern
 — pod-restart-safe task state — is solved by SqlAlchemyTaskStore alone and
 does not require Celery.
@@ -24,10 +24,10 @@ import logging
 import traceback
 from typing import Any, Dict
 
-from adk_persistence.celery.celery_app import celery_app
-from adk_persistence.celery.config import settings
-from adk_persistence.celery.registry import registry
-from adk_persistence.celery.runner import AgentRunner
+from adk_task_persistence.celery.celery_app import celery_app
+from adk_task_persistence.celery.config import settings
+from adk_task_persistence.celery.registry import registry
+from adk_task_persistence.celery.runner import AgentRunner
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ _FAILED = "failed"
     retry_backoff=settings.retry_backoff,
     retry_backoff_max=settings.retry_backoff_max,
     acks_late=True,
-    name="adk_persistence.celery.worker.execute_a2a_task",
+    name="adk_task_persistence.celery.worker.execute_a2a_task",
 )
 def execute_a2a_task(
     self, agent_id: str, task_id: str, payload: Dict[str, Any]

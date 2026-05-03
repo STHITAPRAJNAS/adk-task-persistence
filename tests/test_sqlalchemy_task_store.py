@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 # conftest.py registers a2a stubs before any imports
 from tests.conftest import ListTasksRequest, ServerCallContext, Task, TaskState, TaskStatus
-from adk_persistence.stores.sqlalchemy_task_store import SqlAlchemyTaskStore
+from adk_task_persistence.stores.sqlalchemy_task_store import SqlAlchemyTaskStore
 
 
 @pytest.fixture

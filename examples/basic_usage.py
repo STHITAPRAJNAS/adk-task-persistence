@@ -5,13 +5,13 @@ This is the recommended pattern: native ADK A2A stack with a persistent
 task store.  Works with RemoteA2aAgent.  No Celery required.
 
 Run:
-    pip install adk-persistence aiosqlite
+    pip install adk-task-persistence aiosqlite
     python examples/basic_usage.py
 """
 
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from adk_persistence import SqlAlchemyTaskStore, create_a2a_app
+from adk_task_persistence import SqlAlchemyTaskStore, create_a2a_app
 
 # 1. Create an async SQLAlchemy engine
 #    For production use Postgres: "postgresql+asyncpg://user:pass@host/db"

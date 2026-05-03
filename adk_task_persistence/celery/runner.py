@@ -41,7 +41,7 @@ class AdkAgentRunner(AgentRunner):
         from google.adk.agents import LlmAgent
         from google.adk.runners import Runner
         from google.adk.sessions import DatabaseSessionService
-        from adk_persistence.celery import AdkAgentRunner, registry
+        from adk_task_persistence.celery import AdkAgentRunner, registry
 
         def agent_factory() -> AdkAgentRunner:
             return AdkAgentRunner(

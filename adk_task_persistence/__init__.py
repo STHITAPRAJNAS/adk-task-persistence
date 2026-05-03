@@ -7,7 +7,7 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 
 """
-adk-persistence — production-ready storage layer for Google Agent ADK.
+adk-task-persistence — production-ready storage layer for Google Agent ADK.
 
 Primary use: replace ADK's ``InMemoryTaskStore`` with a database-backed
 implementation so A2A task state survives pod restarts and is visible
@@ -16,7 +16,7 @@ across all pods in a Kubernetes cluster.
 Quick start::
 
     from sqlalchemy.ext.asyncio import create_async_engine
-    from adk_persistence import SqlAlchemyTaskStore, create_a2a_app
+    from adk_task_persistence import SqlAlchemyTaskStore, create_a2a_app
 
     engine = create_async_engine("postgresql+asyncpg://user:pass@host/db")
     store  = SqlAlchemyTaskStore(engine)
@@ -29,11 +29,11 @@ Quick start::
 
 Optional Celery extension (for offloading long-running agent runs)::
 
-    from adk_persistence.celery import AgentRunner, AdkAgentRunner, registry
+    from adk_task_persistence.celery import AgentRunner, AdkAgentRunner, registry
 """
 
-from adk_persistence.app import create_a2a_app
-from adk_persistence.stores.sqlalchemy_task_store import SqlAlchemyTaskStore
+from adk_task_persistence.app import create_a2a_app
+from adk_task_persistence.stores.sqlalchemy_task_store import SqlAlchemyTaskStore
 
 __all__ = [
     "SqlAlchemyTaskStore",

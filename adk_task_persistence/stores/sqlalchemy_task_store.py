@@ -19,7 +19,7 @@ Implements the ``a2a.server.tasks.TaskStore`` ABC so it can be passed
 directly to ADK's A2A machinery:
 
 * **Today** (before ADK PRs #3839/#4970 merge): use ``create_a2a_app()``
-  from ``adk_persistence.app`` which builds the A2A stack manually.
+  from ``adk_task_persistence.app`` which builds the A2A stack manually.
 
 * **After PR #4970 merges**::
 
@@ -87,7 +87,7 @@ class SqlAlchemyTaskStore(_TaskStoreBase):  # type: ignore[misc]
     Usage::
 
         from sqlalchemy.ext.asyncio import create_async_engine
-        from adk_persistence import SqlAlchemyTaskStore
+        from adk_task_persistence import SqlAlchemyTaskStore
 
         engine = create_async_engine("postgresql+asyncpg://user:pass@host/db")
         store  = SqlAlchemyTaskStore(engine)
@@ -96,7 +96,7 @@ class SqlAlchemyTaskStore(_TaskStoreBase):  # type: ignore[misc]
         app = get_fast_api_app(..., a2a=True, a2a_task_store=store)
 
         # Or use today via create_a2a_app():
-        from adk_persistence import create_a2a_app
+        from adk_task_persistence import create_a2a_app
         app = create_a2a_app(runner=runner, agent_card=card, task_store=store)
     """
 

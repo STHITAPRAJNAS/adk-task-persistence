@@ -19,7 +19,7 @@ class AgentRegistry:
 
     Usage::
 
-        from adk_persistence.celery import registry
+        from adk_task_persistence.celery import registry
 
         registry.register(
             "my_agent",
