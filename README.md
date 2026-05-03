@@ -16,6 +16,10 @@ This package acts as a seamless, drop-in replacement for the native ADK executio
 
 Instead of wrapping your agent with `get_fastapi_app`, you wrap factory functions (to allow lazy loading in separate worker processes) using `AgentRegistry.register(...)`, and then serve the decoupled HTTP endpoints using `get_celery_fastapi_app()`. The A2A protocol behavior (`POST /`, `GET /task/{task_id}`) remains identical to the native implementation.
 
+### Compatibility with ADK CLI and `agui`
+
+If you are using the `adk` CLI tool or the `agui` middleware, `get_celery_fastapi_app` is fully compatible. You can pass native arguments like `stateful_task_store` directly to the builder, and it will transparently map them or pass them through to the underlying FastAPI application. Furthermore, because it returns a standard `FastAPI` instance, you can mount `agui` or any other middleware using `app.add_middleware(...)`.
+
 ## Installation
 
 ```bash

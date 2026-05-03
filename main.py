@@ -14,6 +14,7 @@
 
 import asyncio
 from typing import Any, Dict
+from fastapi.middleware.cors import CORSMiddleware
 
 # Mocking Google ADK components
 class BaseAgent:
@@ -64,8 +65,25 @@ from adk_celery_broker.executor import get_celery_fastapi_app
 AGENT_ID = "my_demo_agent"
 registry.register(AGENT_ID, agent_factory, session_service_factory)
 
-# 2. Build the FastAPI app using the registered agent ID
-app = get_celery_fastapi_app(agent_id=AGENT_ID)
+# 2. Build the FastAPI app
+# Demonstrate passing ADK CLI arguments like `stateful_task_store` directly.
+# The builder maps it to the session_service under the hood for backwards compatibility.
+my_task_store = session_service_factory()
+app = get_celery_fastapi_app(
+    agent_id=AGENT_ID,
+    stateful_task_store=my_task_store,
+    # Any other standard FastAPI kwargs are passed through:
+    title="My ADK API with agui Compatibility"
+)
+
+# 3. Mount any required middlewares (e.g., agui, CORS) just like a normal FastAPI app
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 if __name__ == "__main__":
     import uvicorn
